@@ -162,12 +162,6 @@ function buildPDF({ title, subtitle, niche, price, wordCount, estPages, content 
     ML, PH - 58, { charSpace: 1 }
   );
 
-  // Price
-  doc.setFontSize(15);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(232, 184, 75);
-  doc.text('$' + price, PW - MR, PH - 58, { align: 'right' });
-
   // Bottom rule
   doc.setDrawColor(35, 33, 52);
   doc.setLineWidth(0.5);
@@ -393,7 +387,7 @@ function buildPDF({ title, subtitle, niche, price, wordCount, estPages, content 
 
   doc.setFontSize(8.5);
   doc.setTextColor(75, 70, 58);
-  doc.text('$' + price + '   PDF Digital Edition   ' + estPages + ' pages', ML, PH - 36);
+  doc.text('PDF Digital Edition   ' + estPages + ' pages', ML, PH - 36);
 
   return doc.output('arraybuffer');
 }
