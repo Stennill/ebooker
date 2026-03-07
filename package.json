@@ -1,0 +1,15 @@
+{
+  "name": "ebook-broker-renderer",
+  "version": "1.0.0",
+  "description": "PDF renderer for EbookBroker",
+  "main": "renderer.js",
+  "scripts": {
+    "start": "node renderer.js"
+  },
+  "dependencies": {
+    "jspdf": "^2.5.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
