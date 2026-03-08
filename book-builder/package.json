@@ -1,0 +1,12 @@
+{
+  "name": "ebook-book-builder",
+  "version": "1.0.0",
+  "description": "Chapter-by-chapter ebook builder for EbookBroker",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
