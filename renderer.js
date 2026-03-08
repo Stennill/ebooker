@@ -154,13 +154,10 @@ function buildPDF({ title, subtitle, niche, price, wordCount, estPages, content 
   const subLines = doc.splitTextToSize(subtitle, CW);
   doc.text(subLines, ML, afterTitle + 22);
 
-  // Bottom stats row
+  // Bottom label
   doc.setFontSize(8);
   doc.setTextColor(95, 88, 72);
-  doc.text(
-    wordCount.toLocaleString() + ' WORDS   ~' + estPages + ' PAGES   PDF DIGITAL EDITION',
-    ML, PH - 58, { charSpace: 1 }
-  );
+  doc.text('PDF DIGITAL EDITION', ML, PH - 58, { charSpace: 1 });
 
   // Bottom rule
   doc.setDrawColor(35, 33, 52);
@@ -196,11 +193,6 @@ function buildPDF({ title, subtitle, niche, price, wordCount, estPages, content 
     // Truncate long TOC entries
     const tocLabel = label.length > 62 ? label.substring(0, 59) + '...' : label;
     doc.text(tocLabel, ML + 28, tocY);
-
-    // Page number (approximate)
-    doc.setTextColor(175, 162, 142);
-    doc.setFontSize(8.5);
-    doc.text(String(i + 3), PW - MR, tocY, { align: 'right' });
 
     tocY += 26;
     if (tocY > PH - 80) {
