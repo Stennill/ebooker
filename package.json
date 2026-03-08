@@ -1,10 +1,13 @@
 {
-  "name": "ebook-book-builder",
+  "name": "ebook-broker-renderer",
   "version": "1.0.0",
-  "description": "Chapter-by-chapter ebook builder for EbookBroker",
-  "main": "index.js",
+  "description": "PDF renderer for EbookBroker",
+  "main": "renderer.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node renderer.js"
+  },
+  "dependencies": {
+    "jspdf": "^2.5.1"
   },
   "engines": {
     "node": ">=18"
