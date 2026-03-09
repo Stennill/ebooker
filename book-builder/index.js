@@ -112,14 +112,10 @@ async function buildBook(topic) {
   const pdfBytes = await generatePDF(topic, fullBook, wordCount, estPages);
   log('Step 5: PDF ready -- ' + Math.round(pdfBytes.byteLength / 1024) + ' KB');
 
-  // Step 6: Save to R2 (non-fatal -- pipeline continues even if this fails)
+  // Step 6: Save to R2 -- MUST succeed before Gumroad publish
   log('Step 6: Saving to R2...');
-  try {
-    const r2Key = await saveToR2(pdfBytes, topic, wordCount, estPages);
-    log('Step 6: Saved -- ' + r2Key);
-  } catch (r2Err) {
-    log('Step 6: R2 save failed (non-fatal) -- ' + r2Err.message);
-  }
+  const r2Key = await saveToR2(pdfBytes, topic);
+  log('Step 6: Saved -- ' + r2Key);
 
   // Step 7: Post to Gumroad
   log('Step 7: Publishing to Gumroad...');
@@ -367,85 +363,89 @@ async function generatePDF(topic, content, wordCount, estPages) {
 
 // ================================================================
 // STEP 6 -- SAVE TO R2
-// Uses Cloudflare R2 S3-compatible API
+// Uses Node https module + AWS Signature v4 for reliability
 // ================================================================
-async function saveToR2(pdfBytes, topic, wordCount, estPages) {
+async function saveToR2(pdfBytes, topic) {
   const accountId = process.env.R2_ACCOUNT_ID;
   const accessKeyId = process.env.R2_ACCESS_KEY_ID;
   const secretKey = process.env.R2_SECRET_ACCESS_KEY;
   const bucket = process.env.R2_BUCKET_NAME || 'ebook-broker-storage';
 
   if (!accountId || !accessKeyId || !secretKey) {
-    console.log('R2 credentials not set -- skipping R2 save');
-    return 'skipped';
+    throw new Error('R2 credentials not set -- cannot save PDF');
   }
+
+  const { createHmac, createHash } = require('crypto');
 
   const date = new Date().toISOString().split('T')[0];
   const slug = topic.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const key = 'ebooks/' + date + '/' + slug + '.pdf';
 
-  // Use fetch with AWS Signature v4 for R2
-  const endpoint = 'https://' + accountId + '.r2.cloudflarestorage.com/' + bucket + '/' + key;
-
-  const { createHmac, createHash } = require('crypto');
+  const host = accountId + '.r2.cloudflarestorage.com';
+  const path = '/' + bucket + '/' + key;
 
   const now = new Date();
   const dateStamp = now.toISOString().slice(0, 10).replace(/-/g, '');
   const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
 
-  const contentHash = createHash('sha256').update(pdfBytes).digest('hex');
-
-  const headers = {
-    'Content-Type': 'application/pdf',
-    'x-amz-date': amzDate,
-    'x-amz-content-sha256': contentHash,
-    'Host': accountId + '.r2.cloudflarestorage.com',
-  };
+  const bodyBuffer = Buffer.isBuffer(pdfBytes) ? pdfBytes : Buffer.from(pdfBytes);
+  const contentHash = createHash('sha256').update(bodyBuffer).digest('hex');
 
   const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date';
   const canonicalHeaders = [
     'content-type:application/pdf',
-    'host:' + accountId + '.r2.cloudflarestorage.com',
+    'host:' + host,
     'x-amz-content-sha256:' + contentHash,
     'x-amz-date:' + amzDate,
   ].join('\n') + '\n';
 
   const canonicalRequest = [
-    'PUT',
-    '/' + bucket + '/' + key,
-    '',
-    canonicalHeaders,
-    signedHeaders,
-    contentHash,
+    'PUT', path, '',
+    canonicalHeaders, signedHeaders, contentHash,
   ].join('\n');
 
   const credentialScope = dateStamp + '/auto/s3/aws4_request';
   const stringToSign = [
-    'AWS4-HMAC-SHA256',
-    amzDate,
-    credentialScope,
+    'AWS4-HMAC-SHA256', amzDate, credentialScope,
     createHash('sha256').update(canonicalRequest).digest('hex'),
   ].join('\n');
 
   const signingKey = ['aws4_request', 's3', 'auto', dateStamp].reduce(
-    (key, data) => createHmac('sha256', key).update(data).digest(),
-    'AWS4' + secretKey
+    (k, d) => createHmac('sha256', k).update(d).digest(),
+    Buffer.from('AWS4' + secretKey)
   );
 
   const signature = createHmac('sha256', signingKey).update(stringToSign).digest('hex');
   const authorization = 'AWS4-HMAC-SHA256 Credential=' + accessKeyId + '/' + credentialScope +
     ', SignedHeaders=' + signedHeaders + ', Signature=' + signature;
 
-  const res = await fetch(endpoint, {
-    method: 'PUT',
-    headers: { ...headers, Authorization: authorization },
-    body: pdfBytes,
+  await new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: host,
+      path: path,
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Length': bodyBuffer.length,
+        'x-amz-date': amzDate,
+        'x-amz-content-sha256': contentHash,
+        'Authorization': authorization,
+      },
+    }, (res) => {
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve();
+        } else {
+          reject(new Error('R2 upload failed ' + res.statusCode + ': ' + Buffer.concat(chunks).toString()));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.write(bodyBuffer);
+    req.end();
   });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error('R2 save failed: ' + err);
-  }
 
   return key;
 }
