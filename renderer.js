@@ -103,23 +103,14 @@ function buildPDF({ title, subtitle, niche, wordCount, estPages, content }) {
   function navyPage() {
     fill(NAVY);
     doc.rect(0, 0, PW, PH, 'F');
-    drawBlueprintGrid(0, 0, PW, PH, 0.06);
+    drawBlueprintGrid(0, 0, PW, PH, 0.025);
   }
 
   function newPage() {
     doc.addPage();
     pageNum++;
-    // Light content pages -- off-white with very subtle navy tint
     doc.setFillColor(248, 250, 253);
     doc.rect(0, 0, PW, PH, 'F');
-    // Subtle grid
-    doc.setGState(new doc.GState({ opacity: 0.03 }));
-    stroke([10, 22, 40]);
-    doc.setLineWidth(0.3);
-    const step = 28;
-    for (let gx = ML; gx <= PW - MR; gx += step) doc.line(gx, 50, gx, PH - MB);
-    for (let gy = 50; gy <= PH - MB; gy += step) doc.line(ML, gy, PW - MR, gy);
-    doc.setGState(new doc.GState({ opacity: 1 }));
   }
 
   function drawHeader() {
