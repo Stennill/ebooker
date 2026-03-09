@@ -452,28 +452,26 @@ async function saveToR2(pdfBytes, topic, wordCount, estPages) {
 
 // ================================================================
 // STEP 7 -- PUBLISH TO GUMROAD
+// Uses Bearer token in Authorization header
 // ================================================================
 async function publishToGumroad(topic, pdfBytes) {
   const token = process.env.GUMROAD_ACCESS_TOKEN;
   if (!token) throw new Error('GUMROAD_ACCESS_TOKEN not set');
 
   const filename = topic.title.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '.pdf';
+  const auth = { 'Authorization': 'Bearer ' + token };
 
-  // 7a. Create product
-  const createForm = new FormData();
-  createForm.append('access_token', token);
-  createForm.append('name', topic.gumroad_name || topic.title);
-  createForm.append('description', topic.gumroad_description || topic.subtitle);
-  createForm.append('price', String(Math.round(topic.price * 100)));
-  createForm.append('currency', 'usd');
-  createForm.append('published', 'false');
-  if (topic.gumroad_tags) {
-    topic.gumroad_tags.forEach(tag => createForm.append('tags[]', tag));
-  }
-
+  // 7a. Create product -- use JSON body for initial creation
   const createRes = await fetch('https://api.gumroad.com/v2/products', {
     method: 'POST',
-    body: createForm,
+    headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: topic.gumroad_name || topic.title,
+      description: topic.gumroad_description || topic.subtitle,
+      price: Math.round(topic.price * 100),
+      currency: 'usd',
+      published: false,
+    }),
   });
 
   const createText = await createRes.text();
@@ -491,13 +489,13 @@ async function publishToGumroad(topic, pdfBytes) {
   const productId = createData.product.id;
   console.log('Gumroad product created: ' + productId);
 
-  // 7b. Upload PDF
+  // 7b. Upload PDF -- must use multipart form for file upload
   const uploadForm = new FormData();
-  uploadForm.append('access_token', token);
   uploadForm.append('file', new Blob([pdfBytes], { type: 'application/pdf' }), filename);
 
   const uploadRes = await fetch('https://api.gumroad.com/v2/products/' + productId + '/product_files', {
     method: 'POST',
+    headers: auth,
     body: uploadForm,
   });
 
@@ -516,13 +514,10 @@ async function publishToGumroad(topic, pdfBytes) {
   console.log('PDF uploaded to Gumroad.');
 
   // 7c. Publish
-  const publishForm = new FormData();
-  publishForm.append('access_token', token);
-  publishForm.append('published', 'true');
-
   const publishRes = await fetch('https://api.gumroad.com/v2/products/' + productId, {
     method: 'PUT',
-    body: publishForm,
+    headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ published: true }),
   });
 
   const publishText = await publishRes.text();
