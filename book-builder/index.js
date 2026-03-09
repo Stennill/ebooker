@@ -112,10 +112,14 @@ async function buildBook(topic) {
   const pdfBytes = await generatePDF(topic, fullBook, wordCount, estPages);
   log('Step 5: PDF ready -- ' + Math.round(pdfBytes.byteLength / 1024) + ' KB');
 
-  // Step 6: Save to R2
+  // Step 6: Save to R2 (non-fatal -- pipeline continues even if this fails)
   log('Step 6: Saving to R2...');
-  const r2Key = await saveToR2(pdfBytes, topic, wordCount, estPages);
-  log('Step 6: Saved -- ' + r2Key);
+  try {
+    const r2Key = await saveToR2(pdfBytes, topic, wordCount, estPages);
+    log('Step 6: Saved -- ' + r2Key);
+  } catch (r2Err) {
+    log('Step 6: R2 save failed (non-fatal) -- ' + r2Err.message);
+  }
 
   // Step 7: Post to Gumroad
   log('Step 7: Publishing to Gumroad...');
