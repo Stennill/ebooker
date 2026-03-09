@@ -118,13 +118,8 @@ async function buildBook(topic) {
   const r2Key = await saveToR2(pdfBytes, topic);
   log('Step 6: Saved -- ' + r2Key);
 
-  // Step 7: Post to Gumroad
-  log('Step 7: Publishing to Gumroad...');
-  const gumroadUrl = await publishToGumroad(topic, pdfBytes);
-  log('Step 7: LIVE -- ' + gumroadUrl);
-
-  log('=== COMPLETE === ' + gumroadUrl);
-  return gumroadUrl;
+  log('=== COMPLETE === PDF saved to R2: ' + r2Key);
+  return r2Key;
 }
 
 // ================================================================
