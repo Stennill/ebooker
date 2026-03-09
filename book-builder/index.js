@@ -23,6 +23,7 @@
 
 const http = require('http');
 const https = require('https');
+const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 
 const PORT = process.env.PORT || 3001;
 
@@ -141,9 +142,10 @@ SUBTITLE: ${topic.subtitle}
 FOR: ${topic.target_audience}
 PROBLEM SOLVED: ${topic.core_problem}
 TRANSFORMATION: ${topic.transformation}
-CHAPTERS: ${chapterCount}
+CHAPTERS: ${chapterCount} chapters (this is the target -- stay within 1 of this number)
 WORDS PER CHAPTER: ${topic.words_per_chapter || 1500}
 
+IMPORTANT: The "chapters" array must contain ${chapterCount} objects (between 13 and 16).
 Each chapter should build logically on the previous one, taking the reader 
 from their current problem to the full transformation by the final chapter.
 
@@ -158,9 +160,11 @@ Return ONLY raw JSON, no markdown:
       "subsections": ["Subsection 1 title", "Subsection 2 title", "Subsection 3 title"]
     }
   ]
-}`,
-    'Return only raw JSON. No markdown fences. No explanation.',
-    3000
+}
+
+Remember: ${chapterCount} chapter objects in the array.`,
+    'Return only raw JSON. No markdown fences. No explanation. The chapters array must have exactly the requested number of entries.',
+    4000
   );
 
   return JSON.parse(raw.replace(/```json|```/g, '').trim());
@@ -363,7 +367,7 @@ async function generatePDF(topic, content, wordCount, estPages) {
 
 // ================================================================
 // STEP 6 -- SAVE TO R2
-// Uses Node https module + AWS Signature v4 for reliability
+// Uses @aws-sdk/client-s3 for reliable uploads
 // ================================================================
 async function saveToR2(pdfBytes, topic) {
   const accountId = process.env.R2_ACCOUNT_ID;
@@ -375,77 +379,32 @@ async function saveToR2(pdfBytes, topic) {
     throw new Error('R2 credentials not set -- cannot save PDF');
   }
 
-  const { createHmac, createHash } = require('crypto');
+  const client = new S3Client({
+    region: 'auto',
+    endpoint: 'https://' + accountId + '.r2.cloudflarestorage.com',
+    credentials: {
+      accessKeyId: accessKeyId,
+      secretAccessKey: secretKey,
+    },
+  });
 
   const date = new Date().toISOString().split('T')[0];
   const slug = topic.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const key = 'ebooks/' + date + '/' + slug + '.pdf';
 
-  const host = accountId + '.r2.cloudflarestorage.com';
-  const path = '/' + bucket + '/' + key;
-
-  const now = new Date();
-  const dateStamp = now.toISOString().slice(0, 10).replace(/-/g, '');
-  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
-
   const bodyBuffer = Buffer.isBuffer(pdfBytes) ? pdfBytes : Buffer.from(pdfBytes);
-  const contentHash = createHash('sha256').update(bodyBuffer).digest('hex');
 
-  const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date';
-  const canonicalHeaders = [
-    'content-type:application/pdf',
-    'host:' + host,
-    'x-amz-content-sha256:' + contentHash,
-    'x-amz-date:' + amzDate,
-  ].join('\n') + '\n';
-
-  const canonicalRequest = [
-    'PUT', path, '',
-    canonicalHeaders, signedHeaders, contentHash,
-  ].join('\n');
-
-  const credentialScope = dateStamp + '/auto/s3/aws4_request';
-  const stringToSign = [
-    'AWS4-HMAC-SHA256', amzDate, credentialScope,
-    createHash('sha256').update(canonicalRequest).digest('hex'),
-  ].join('\n');
-
-  const signingKey = ['aws4_request', 's3', 'auto', dateStamp].reduce(
-    (k, d) => createHmac('sha256', k).update(d).digest(),
-    Buffer.from('AWS4' + secretKey)
-  );
-
-  const signature = createHmac('sha256', signingKey).update(stringToSign).digest('hex');
-  const authorization = 'AWS4-HMAC-SHA256 Credential=' + accessKeyId + '/' + credentialScope +
-    ', SignedHeaders=' + signedHeaders + ', Signature=' + signature;
-
-  await new Promise((resolve, reject) => {
-    const req = https.request({
-      hostname: host,
-      path: path,
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/pdf',
-        'Content-Length': bodyBuffer.length,
-        'x-amz-date': amzDate,
-        'x-amz-content-sha256': contentHash,
-        'Authorization': authorization,
-      },
-    }, (res) => {
-      const chunks = [];
-      res.on('data', c => chunks.push(c));
-      res.on('end', () => {
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          resolve();
-        } else {
-          reject(new Error('R2 upload failed ' + res.statusCode + ': ' + Buffer.concat(chunks).toString()));
-        }
-      });
-    });
-    req.on('error', reject);
-    req.write(bodyBuffer);
-    req.end();
-  });
+  await client.send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    Body: bodyBuffer,
+    ContentType: 'application/pdf',
+    Metadata: {
+      title: topic.title,
+      niche: topic.niche,
+      price: String(topic.price),
+    },
+  }));
 
   return key;
 }
