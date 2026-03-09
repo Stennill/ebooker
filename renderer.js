@@ -1,16 +1,16 @@
 /**
  * PDF RENDERER
- * Node.js service -- deploy this to Railway.app
- * The Cloudflare Worker calls this to turn ebook content into a real PDF.
- *
- * Endpoints:
- *   GET  /health  -- health check, returns {"status":"ok"}
- *   POST /render  -- accepts JSON, returns PDF binary
+ * Design matches first-month-blueprint site:
+ *   - Dark navy background: #0a1628 (hsl 216,78%,11%)
+ *   - Orange accent: #ff6b1a (hsl 18,100%,56%)
+ *   - Light text: #ddeeff (hsl 210,100%,93%)
+ *   - Blueprint grid overlay
+ *   - Sharp corners, monospace feel
+ *   - Series branding: "The $1K First Month Blueprint"
  */
 
 const http = require('http');
 
-// Load jsPDF for Node.js
 let jsPDF;
 try {
   jsPDF = require('jspdf').jsPDF;
@@ -21,16 +21,22 @@ try {
 
 const PORT = process.env.PORT || 3000;
 
-const server = http.createServer((req, res) => {
+// ── Brand colors (RGB) ─────────────────────────────────────────
+const NAVY       = [10,  22,  40];   // #0a1628 -- background
+const NAVY_CARD  = [14,  28,  52];   // slightly lighter navy
+const ORANGE     = [255, 107, 26];   // #ff6b1a -- primary accent
+const ORANGE_DIM = [200,  80, 10];   // darker orange for text
+const ICE        = [221, 238, 255];  // #ddeeff -- foreground text
+const ICE_DIM    = [140, 165, 195];  // muted foreground
+const ICE_FAINT  = [ 30,  50,  80];  // very subtle grid lines
 
-  // Health check -- used by the Worker to wake this service
+const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'ok', time: new Date().toISOString() }));
     return;
   }
 
-  // PDF render endpoint
   if (req.method === 'POST' && req.url === '/render') {
     let body = '';
     req.on('data', chunk => { body += chunk.toString(); });
@@ -38,16 +44,13 @@ const server = http.createServer((req, res) => {
       try {
         const data = JSON.parse(body);
         console.log('Rendering PDF for: ' + data.title);
-
         const pdfBytes = buildPDF(data);
-
         res.writeHead(200, {
           'Content-Type': 'application/pdf',
           'Content-Length': pdfBytes.byteLength,
         });
         res.end(Buffer.from(pdfBytes));
         console.log('PDF sent: ' + Math.round(pdfBytes.byteLength / 1024) + ' KB');
-
       } catch (err) {
         console.error('Render error:', err.message);
         res.writeHead(500, { 'Content-Type': 'text/plain' });
@@ -67,144 +70,210 @@ server.listen(PORT, () => {
 
 // =================================================================
 // PDF BUILDER
-// Takes the ebook content and produces a formatted PDF.
 // =================================================================
-function buildPDF({ title, subtitle, niche, price, wordCount, estPages, content }) {
+function buildPDF({ title, subtitle, niche, wordCount, estPages, content }) {
   const doc = new jsPDF({ unit: 'pt', format: 'letter' });
-  const PW = doc.internal.pageSize.getWidth();   // 612pt
-  const PH = doc.internal.pageSize.getHeight();  // 792pt
-  const ML = 72, MR = 72, MB = 72;
-  const CW = PW - ML - MR;                       // content width
+  const PW = doc.internal.pageSize.getWidth();
+  const PH = doc.internal.pageSize.getHeight();
+  const ML = 64, MR = 64, MB = 72;
+  const CW = PW - ML - MR;
   let pageNum = 1;
 
-  // ── Helpers ──────────────────────────────────────────────────
+  // ── Helpers ────────────────────────────────────────────────────
+
+  function rgb(c) { return { r: c[0], g: c[1], b: c[2] }; }
+  function fill(c) { doc.setFillColor(c[0], c[1], c[2]); }
+  function stroke(c) { doc.setDrawColor(c[0], c[1], c[2]); }
+  function textColor(c) { doc.setTextColor(c[0], c[1], c[2]); }
+
+  function drawBlueprintGrid(x, y, w, h, opacity) {
+    doc.setGState(new doc.GState({ opacity: opacity || 0.07 }));
+    stroke(ICE);
+    doc.setLineWidth(0.3);
+    const step = 28;
+    for (let gx = x; gx <= x + w; gx += step) {
+      doc.line(gx, y, gx, y + h);
+    }
+    for (let gy = y; gy <= y + h; gy += step) {
+      doc.line(x, gy, x + w, gy);
+    }
+    doc.setGState(new doc.GState({ opacity: 1 }));
+  }
+
+  function navyPage() {
+    fill(NAVY);
+    doc.rect(0, 0, PW, PH, 'F');
+    drawBlueprintGrid(0, 0, PW, PH, 0.06);
+  }
 
   function newPage() {
     doc.addPage();
     pageNum++;
-    doc.setFillColor(250, 248, 244);
+    // Light content pages -- off-white with very subtle navy tint
+    doc.setFillColor(248, 250, 253);
     doc.rect(0, 0, PW, PH, 'F');
+    // Subtle grid
+    doc.setGState(new doc.GState({ opacity: 0.03 }));
+    stroke([10, 22, 40]);
+    doc.setLineWidth(0.3);
+    const step = 28;
+    for (let gx = ML; gx <= PW - MR; gx += step) doc.line(gx, 50, gx, PH - MB);
+    for (let gy = 50; gy <= PH - MB; gy += step) doc.line(ML, gy, PW - MR, gy);
+    doc.setGState(new doc.GState({ opacity: 1 }));
   }
 
   function drawHeader() {
-    doc.setFontSize(7.5);
+    // Orange top bar
+    fill(ORANGE);
+    doc.rect(0, 0, PW, 3, 'F');
+    doc.setFontSize(7);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(180, 165, 145);
-    // Truncate long titles so they don't overflow
-    const shortTitle = title.length > 55 ? title.substring(0, 52) + '...' : title;
-    doc.text(shortTitle.toUpperCase(), ML, 34, { charSpace: 0.5 });
-    doc.text(String(pageNum), PW - MR, 34, { align: 'right' });
-    doc.setDrawColor(220, 210, 195);
-    doc.setLineWidth(0.5);
-    doc.line(ML, 42, PW - MR, 42);
+    textColor(ICE_DIM);
+    const shortTitle = title.length > 60 ? title.substring(0, 57) + '...' : title;
+    doc.text(shortTitle.toUpperCase(), ML, 30, { charSpace: 0.4 });
+    doc.text(String(pageNum), PW - MR, 30, { align: 'right' });
+    stroke(ICE_DIM);
+    doc.setLineWidth(0.3);
+    doc.line(ML, 38, PW - MR, 38);
   }
 
   function checkOverflow(y, needed) {
     if (y + needed > PH - MB) {
       newPage();
       drawHeader();
-      return 62;
+      return 58;
     }
     return y;
   }
 
-  // ── COVER PAGE ───────────────────────────────────────────────
-  doc.setFillColor(12, 12, 20);
-  doc.rect(0, 0, PW, PH, 'F');
+  // ── COVER PAGE ─────────────────────────────────────────────────
+  navyPage();
 
-  // Top gold accent bar
-  doc.setFillColor(232, 184, 75);
-  doc.rect(0, 0, PW, 5, 'F');
+  // Orange top bar
+  fill(ORANGE);
+  doc.rect(0, 0, PW, 6, 'F');
 
-  // Decorative background circles
-  doc.setFillColor(232, 184, 75);
-  doc.setGState(new doc.GState({ opacity: 0.06 }));
-  doc.circle(90, 240, 240, 'F');
+  // Left orange accent stripe
+  fill(ORANGE);
+  doc.setGState(new doc.GState({ opacity: 0.15 }));
+  doc.rect(0, 0, 4, PH, 'F');
   doc.setGState(new doc.GState({ opacity: 1 }));
 
-  doc.setFillColor(45, 212, 191);
-  doc.setGState(new doc.GState({ opacity: 0.05 }));
-  doc.circle(PW - 70, PH - 90, 190, 'F');
+  // Series label top left
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'bold');
+  textColor(ORANGE);
+  doc.text('THE $1K FIRST MONTH BLUEPRINT', ML, 40, { charSpace: 1.5 });
+
+  // Niche tag
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'normal');
+  textColor(ICE_DIM);
+  doc.text('[ ' + niche.toUpperCase() + ' ]', ML, 56, { charSpace: 1 });
+
+  // Horizontal rule
+  stroke(ORANGE);
+  doc.setGState(new doc.GState({ opacity: 0.3 }));
+  doc.setLineWidth(0.5);
+  doc.line(ML, 66, PW - MR, 66);
   doc.setGState(new doc.GState({ opacity: 1 }));
 
-  // Niche label
-  doc.setFontSize(8.5);
+  // Large decorative $ sign background
+  doc.setFontSize(320);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(45, 212, 191);
-  doc.text(niche.toUpperCase(), ML, 62, { charSpace: 2 });
+  textColor(ORANGE);
+  doc.setGState(new doc.GState({ opacity: 0.04 }));
+  doc.text('$', PW - 60, PH / 2 + 160, { align: 'right' });
+  doc.setGState(new doc.GState({ opacity: 1 }));
 
-  // Title
-  doc.setTextColor(250, 248, 244);
-  doc.setFontSize(30);
+  // Main title
+  doc.setFontSize(28);
   doc.setFont('helvetica', 'bold');
+  textColor(ICE);
   const titleLines = doc.splitTextToSize(title, CW);
-  const titleY = PH / 2 - (titleLines.length * 36) / 2;
+  const titleY = PH / 2 - (titleLines.length * 34) / 2 - 20;
   doc.text(titleLines, ML, titleY);
 
-  // Gold divider line
-  const afterTitle = titleY + titleLines.length * 36 + 10;
-  doc.setDrawColor(232, 184, 75);
-  doc.setLineWidth(1.5);
-  doc.line(ML, afterTitle, ML + 110, afterTitle);
+  // Orange accent line under title
+  const afterTitle = titleY + titleLines.length * 34 + 8;
+  fill(ORANGE);
+  doc.rect(ML, afterTitle, 60, 3, 'F');
 
   // Subtitle
-  doc.setFontSize(13);
+  doc.setFontSize(12);
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(185, 165, 115);
+  textColor(ICE_DIM);
   const subLines = doc.splitTextToSize(subtitle, CW);
-  doc.text(subLines, ML, afterTitle + 22);
+  doc.text(subLines, ML, afterTitle + 20);
 
-  // Bottom label
-  doc.setFontSize(8);
-  doc.setTextColor(95, 88, 72);
-  doc.text('PDF DIGITAL EDITION', ML, PH - 58, { charSpace: 1 });
-
-  // Bottom rule
-  doc.setDrawColor(35, 33, 52);
+  // Bottom section
+  stroke(ICE_DIM);
+  doc.setGState(new doc.GState({ opacity: 0.2 }));
   doc.setLineWidth(0.5);
-  doc.line(ML, PH - 70, PW - MR, PH - 70);
+  doc.line(ML, PH - 80, PW - MR, PH - 80);
+  doc.setGState(new doc.GState({ opacity: 1 }));
 
-  // ── TABLE OF CONTENTS PAGE ───────────────────────────────────
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'normal');
+  textColor(ICE_DIM);
+  doc.text('PDF DIGITAL EDITION', ML, PH - 62, { charSpace: 1.5 });
+
+  // Bottom orange bar
+  fill(ORANGE);
+  doc.rect(0, PH - 5, PW, 5, 'F');
+
+  // ── TABLE OF CONTENTS ──────────────────────────────────────────
   newPage();
+  drawHeader();
 
-  doc.setFontSize(22);
+  // TOC header
+  fill(NAVY);
+  doc.rect(ML - 8, 48, CW + 16, 36, 'F');
+  doc.setFontSize(13);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(12, 12, 20);
-  doc.text('Table of Contents', ML, 82);
+  textColor(ICE);
+  doc.text('TABLE OF CONTENTS', ML, 72);
+  fill(ORANGE);
+  doc.rect(ML - 8, 84, CW + 16, 3, 'F');
 
-  doc.setDrawColor(232, 184, 75);
-  doc.setLineWidth(2);
-  doc.line(ML, 95, ML + 160, 95);
-
-  // Pull chapter headings from content for TOC
   const tocHeadings = (content.match(/^# .+$/gm) || []);
-  let tocY = 125;
+  let tocY = 108;
   tocHeadings.forEach((heading, i) => {
     const label = heading.replace(/^# /, '');
     const isWorkbook = label.toLowerCase().includes('workbook');
 
-    doc.setFontSize(9.5);
+    if (tocY > PH - 80) { newPage(); drawHeader(); tocY = 58; }
+
+    // Number
+    doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(isWorkbook ? 26 : 200, isWorkbook ? 190 : 65, isWorkbook ? 165 : 10);
+    textColor(isWorkbook ? ICE_DIM : ORANGE);
     doc.text(String(i + 1).padStart(2, '0'), ML, tocY);
 
+    // Label
+    doc.setFontSize(9.5);
     doc.setFont('helvetica', isWorkbook ? 'italic' : 'normal');
-    doc.setTextColor(20, 18, 32);
-    // Truncate long TOC entries
-    const tocLabel = label.length > 62 ? label.substring(0, 59) + '...' : label;
-    doc.text(tocLabel, ML + 28, tocY);
+    textColor(isWorkbook ? ICE_DIM : [30, 40, 60]);
+    const tocLabel = label.length > 65 ? label.substring(0, 62) + '...' : label;
+    doc.text(tocLabel, ML + 24, tocY);
 
-    tocY += 26;
-    if (tocY > PH - 80) {
-      newPage();
-      tocY = 60;
-    }
+    // Dot leader line
+    stroke(ICE_DIM);
+    doc.setGState(new doc.GState({ opacity: 0.2 }));
+    doc.setLineWidth(0.3);
+    doc.setLineDashPattern([1, 3], 0);
+    const labelWidth = doc.getTextWidth(tocLabel);
+    doc.line(ML + 26 + labelWidth, tocY - 3, PW - MR - 2, tocY - 3);
+    doc.setLineDashPattern([], 0);
+    doc.setGState(new doc.GState({ opacity: 1 }));
+
+    tocY += 24;
   });
 
-  // ── CONTENT PAGES ────────────────────────────────────────────
+  // ── CONTENT PAGES ──────────────────────────────────────────────
   newPage();
   drawHeader();
-  let y = 62;
+  let y = 58;
 
   const lines = content.split('\n');
   let inWorkbook = false;
@@ -212,113 +281,114 @@ function buildPDF({ title, subtitle, niche, price, wordCount, estPages, content 
   for (const rawLine of lines) {
     const line = rawLine.trim();
 
-    // Blank line
-    if (!line) {
-      y += 7;
-      continue;
-    }
+    if (!line) { y += 8; continue; }
 
-    // H1 -- chapter heading, always starts a new page
+    // H1 -- chapter heading
     if (line.startsWith('# ') && !line.startsWith('## ') && !line.startsWith('### ')) {
-      if (inWorkbook) inWorkbook = false;
-      if (y > 110) {
-        newPage();
-        drawHeader();
-        y = 62;
-      }
-      // Accent bar
-      doc.setFillColor(232, 184, 75);
-      doc.rect(ML, y, 3, 28, 'F');
-      // Chapter title
-      doc.setFontSize(19);
+      inWorkbook = false;
+      if (y > 120) { newPage(); drawHeader(); y = 58; }
+
+      // Navy banner for chapter headings
+      fill(NAVY);
+      const ht = doc.splitTextToSize(line.replace(/^# /, ''), CW - 16);
+      doc.rect(ML - 8, y - 4, CW + 16, ht.length * 22 + 20, 'F');
+
+      // Orange left accent
+      fill(ORANGE);
+      doc.rect(ML - 8, y - 4, 4, ht.length * 22 + 20, 'F');
+
+      doc.setFontSize(17);
       doc.setFont('helvetica', 'bold');
-      doc.setTextColor(12, 12, 20);
-      const ht = doc.splitTextToSize(line.replace(/^# /, ''), CW - 12);
-      doc.text(ht, ML + 10, y + 20);
-      y += ht.length * 23 + 18;
-      // Rule under heading
-      doc.setDrawColor(230, 218, 202);
+      textColor(ICE);
+      doc.text(ht, ML + 4, y + 14);
+      y += ht.length * 22 + 24;
+
+      stroke(ORANGE);
+      doc.setGState(new doc.GState({ opacity: 0.3 }));
       doc.setLineWidth(0.5);
       doc.line(ML, y, PW - MR, y);
+      doc.setGState(new doc.GState({ opacity: 1 }));
       y += 14;
       continue;
     }
 
-    // H3 -- used for subtitle on title page (italic, smaller)
+    // H3
     if (line.startsWith('### ')) {
       y = checkOverflow(y, 22);
-      doc.setFontSize(11);
+      doc.setFontSize(10);
       doc.setFont('helvetica', 'italic');
-      doc.setTextColor(145, 125, 95);
+      textColor(ICE_DIM);
       doc.text(line.replace(/^### /, ''), ML, y + 11);
       y += 22;
       continue;
     }
 
-    // H2 -- sub-sections, workbook headers
+    // H2 -- sub-sections
     if (line.startsWith('## ')) {
       const label = line.replace(/^## /, '');
       const isWB = label.toLowerCase().startsWith('workbook:');
-
-      y = checkOverflow(y, 30);
+      y = checkOverflow(y, 32);
 
       if (isWB) {
         inWorkbook = true;
-        // Teal background strip for workbook sections
-        doc.setFillColor(45, 212, 191);
-        doc.setGState(new doc.GState({ opacity: 0.09 }));
-        doc.rect(ML - 8, y - 4, CW + 16, 24, 'F');
+        fill(ORANGE);
+        doc.setGState(new doc.GState({ opacity: 0.1 }));
+        doc.rect(ML - 8, y - 4, CW + 16, 26, 'F');
         doc.setGState(new doc.GState({ opacity: 1 }));
-        doc.setFontSize(12);
+        fill(ORANGE);
+        doc.rect(ML - 8, y - 4, 3, 26, 'F');
+        doc.setFontSize(11);
         doc.setFont('helvetica', 'bold');
-        doc.setTextColor(20, 155, 130);
+        textColor(ORANGE_DIM);
       } else {
         inWorkbook = false;
         doc.setFontSize(13);
         doc.setFont('helvetica', 'bold');
-        doc.setTextColor(200, 65, 10);
+        textColor(NAVY);
+        // Subtle orange underline
+        const labelW = doc.getStringUnitWidth(label.replace(/^## /, '')) * 13 / doc.internal.scaleFactor;
       }
 
       const ht = doc.splitTextToSize(label, CW);
-      doc.text(ht, ML, y + 14);
+      doc.text(ht, ML, y + 16);
       y += ht.length * 18 + 10;
       continue;
     }
 
-    // Blockquote -- callout / key takeaway
+    // Blockquote
     if (line.startsWith('> ')) {
       const qt = line.replace(/^> /, '').replace(/\*\*(.+?)\*\*/g, '$1');
       const qLines = doc.splitTextToSize(qt, CW - 24);
-      y = checkOverflow(y, qLines.length * 14 + 22);
+      y = checkOverflow(y, qLines.length * 14 + 24);
 
-      // Gold background
-      doc.setFillColor(232, 184, 75);
-      doc.setGState(new doc.GState({ opacity: 0.08 }));
-      doc.rect(ML, y - 3, CW, qLines.length * 14 + 22, 'F');
+      fill(ORANGE);
+      doc.setGState(new doc.GState({ opacity: 0.07 }));
+      doc.rect(ML, y - 4, CW, qLines.length * 14 + 24, 'F');
       doc.setGState(new doc.GState({ opacity: 1 }));
-      // Gold left border
-      doc.setFillColor(232, 184, 75);
-      doc.rect(ML, y - 3, 3, qLines.length * 14 + 22, 'F');
+      fill(ORANGE);
+      doc.rect(ML, y - 4, 3, qLines.length * 14 + 24, 'F');
 
       doc.setFontSize(10);
       doc.setFont('helvetica', 'bolditalic');
-      doc.setTextColor(155, 118, 20);
+      textColor(ORANGE_DIM);
       doc.text(qLines, ML + 14, y + 11);
-      y += qLines.length * 14 + 26;
+      y += qLines.length * 14 + 28;
       continue;
     }
 
     // Bullet list
     if (line.match(/^[*-] /)) {
       const bt = line.replace(/^[*-] /, '').replace(/\*\*(.+?)\*\*/g, '$1');
-      const bLines = doc.splitTextToSize(bt, CW - 20);
+      const bLines = doc.splitTextToSize(bt, CW - 18);
       y = checkOverflow(y, bLines.length * 14 + 6);
 
-      doc.setFillColor(232, 184, 75);
-      doc.circle(ML + 5, y + 7, 2.2, 'F');
+      // Orange square bullet
+      fill(ORANGE);
+      doc.rect(ML + 2, y + 4, 4, 4, 'F');
+
       doc.setFontSize(10.5);
       doc.setFont('helvetica', 'normal');
-      doc.setTextColor(38, 35, 52);
+      textColor([30, 40, 60]);
       doc.text(bLines, ML + 16, y + 10);
       y += bLines.length * 14 + 6;
       continue;
@@ -331,7 +401,7 @@ function buildPDF({ title, subtitle, niche, price, wordCount, estPages, content 
       y = checkOverflow(y, fLines.length * 14 + 10);
       doc.setFontSize(10);
       doc.setFont('helvetica', 'italic');
-      doc.setTextColor(85, 78, 105);
+      textColor(ICE_DIM);
       doc.text(fLines, ML + 6, y + 11);
       y += fLines.length * 14 + 10;
       continue;
@@ -344,42 +414,56 @@ function buildPDF({ title, subtitle, niche, price, wordCount, estPages, content 
       y = checkOverflow(y, 16);
       doc.setFontSize(10.5);
       doc.setFont('helvetica', 'normal');
-      doc.setTextColor(38, 35, 50);
+      textColor([30, 40, 60]);
       doc.text(pl, ML, y);
       y += 16;
     }
-    y += 6; // paragraph spacing
+    y += 6;
   }
 
-  // ── BACK COVER ───────────────────────────────────────────────
+  // ── BACK COVER ─────────────────────────────────────────────────
   newPage();
-  doc.setFillColor(12, 12, 20);
-  doc.rect(0, 0, PW, PH, 'F');
+  navyPage();
 
-  // Bottom gold bar
-  doc.setFillColor(232, 184, 75);
+  fill(ORANGE);
+  doc.rect(0, 0, PW, 6, 'F');
   doc.rect(0, PH - 5, PW, 5, 'F');
 
-  // Decorative circle
-  doc.setFillColor(45, 212, 191);
-  doc.setGState(new doc.GState({ opacity: 0.06 }));
-  doc.circle(PW - 90, 150, 210, 'F');
+  // Decorative large $ sign
+  doc.setFontSize(260);
+  doc.setFont('helvetica', 'bold');
+  textColor(ORANGE);
+  doc.setGState(new doc.GState({ opacity: 0.05 }));
+  doc.text('$1K', ML - 10, PH / 2 + 90);
   doc.setGState(new doc.GState({ opacity: 1 }));
 
-  doc.setTextColor(250, 248, 244);
+  // Series label
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'bold');
+  textColor(ORANGE);
+  doc.text('THE $1K FIRST MONTH BLUEPRINT SERIES', ML, PH / 2 - 50, { charSpace: 1.2 });
+
+  stroke(ORANGE);
+  doc.setGState(new doc.GState({ opacity: 0.3 }));
+  doc.setLineWidth(0.5);
+  doc.line(ML, PH / 2 - 38, PW - MR, PH / 2 - 38);
+  doc.setGState(new doc.GState({ opacity: 1 }));
+
   doc.setFontSize(15);
   doc.setFont('helvetica', 'bold');
-  doc.text('Thank you for reading.', ML, PH / 2 - 14);
-
-  doc.setFontSize(10.5);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(145, 132, 108);
+  textColor(ICE);
   const backTitleLines = doc.splitTextToSize(title, CW);
-  doc.text(backTitleLines, ML, PH / 2 + 10);
+  doc.text(backTitleLines, ML, PH / 2 - 18);
 
-  doc.setFontSize(8.5);
-  doc.setTextColor(75, 70, 58);
-  doc.text('PDF Digital Edition   ' + estPages + ' pages', ML, PH - 36);
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  textColor(ICE_DIM);
+  const subBack = doc.splitTextToSize(subtitle, CW);
+  doc.text(subBack, ML, PH / 2 - 18 + backTitleLines.length * 20 + 10);
+
+  doc.setFontSize(7.5);
+  textColor(ICE_DIM);
+  doc.text('PDF Digital Edition   ' + estPages + ' pages', ML, PH - 24, { charSpace: 0.5 });
 
   return doc.output('arraybuffer');
 }
