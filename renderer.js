@@ -1,4 +1,4 @@
-/**
+/** Update
  * PDF RENDERER
  * Design matches first-month-blueprint site:
  *   - Dark navy background: #0a1628 (hsl 216,78%,11%)
