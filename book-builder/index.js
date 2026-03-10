@@ -421,58 +421,81 @@ async function saveToR2(pdfBytes, topic) {
 }
 
 // ================================================================
-// UPDATE MANIFEST -- keeps a public manifest.json in R2 with all
-// published books so the site can fetch and display them
+// UPDATE MANIFEST
+// manifest.json structure:
+// {
+//   allBooks: [...],          -- every book ever built, grouped by niche on site
+//   currentBundle: [...],     -- the 3 most recent books (active bundle)
+//   bundleArchive: [          -- previous complete bundles
+//     { id, niche, books: [...], bundledAt }
+//   ]
+// }
 // ================================================================
 async function updateManifest(client, bucket, topic, pdfKey, estPages) {
+  const { GetObjectCommand } = require('@aws-sdk/client-s3');
+
   // Read existing manifest
-  let books = [];
+  let manifest = { allBooks: [], currentBundle: [], bundleArchive: [] };
   try {
-    const { GetObjectCommand } = require('@aws-sdk/client-s3');
     const existing = await client.send(new GetObjectCommand({
       Bucket: bucket,
       Key: 'manifest.json',
     }));
     const chunks = [];
     for await (const chunk of existing.Body) chunks.push(chunk);
-    books = JSON.parse(Buffer.concat(chunks).toString());
+    manifest = JSON.parse(Buffer.concat(chunks).toString());
+    // Ensure all keys exist
+    manifest.allBooks = manifest.allBooks || [];
+    manifest.currentBundle = manifest.currentBundle || [];
+    manifest.bundleArchive = manifest.bundleArchive || [];
   } catch (e) {
     // No manifest yet -- start fresh
-    books = [];
   }
 
-  // Build chapter list from outline if available, fallback to empty
-  const chapterTitles = (topic.chapterTitles || []);
-
-  // Add this book
+  // Build the new book entry
   const slug = topic.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  books.push({
-    id: 'BP-' + String(books.length + 1).padStart(3, '0'),
+  const newBook = {
+    id: 'BP-' + String(manifest.allBooks.length + 1).padStart(3, '0'),
     slug: slug,
     title: topic.title,
     subtitle: topic.subtitle,
     niche: topic.niche,
-    price: '$' + (topic.price || 14.99),
+    price: topic.price || 14.99,
     pages: estPages,
-    chapters: chapterTitles,
+    chapters: topic.chapterTitles || [],
     pdfKey: pdfKey,
     publishedAt: new Date().toISOString(),
-  });
+  };
 
-  // Only keep the latest 3 books (one bundle's worth)
-  // Older books roll off -- swap this logic when you want a full catalogue
-  if (books.length > 3) books = books.slice(-3);
+  // Add to allBooks
+  manifest.allBooks.push(newBook);
+
+  // Add to currentBundle
+  manifest.currentBundle.push(newBook);
+
+  // When currentBundle hits 3 books -- seal it as a bundle and start fresh
+  if (manifest.currentBundle.length >= 3) {
+    const bundleNiche = manifest.currentBundle[0].niche;
+    manifest.bundleArchive.push({
+      id: 'BUNDLE-' + String(manifest.bundleArchive.length + 1).padStart(3, '0'),
+      niche: bundleNiche,
+      price: 49,
+      books: manifest.currentBundle.slice(0, 3),
+      bundledAt: new Date().toISOString(),
+    });
+    // Reset currentBundle for the next set
+    manifest.currentBundle = manifest.currentBundle.slice(3);
+  }
 
   await client.send(new PutObjectCommand({
     Bucket: bucket,
     Key: 'manifest.json',
-    Body: Buffer.from(JSON.stringify(books, null, 2)),
+    Body: Buffer.from(JSON.stringify(manifest, null, 2)),
     ContentType: 'application/json',
-    // Allow the site to read this publicly
     ACL: 'public-read',
   }));
 
-  console.log('Manifest updated -- ' + books.length + ' books');
+  console.log('Manifest updated -- ' + manifest.allBooks.length + ' total books, ' + manifest.bundleArchive.length + ' bundles archived');
 }
 
 // ================================================================
@@ -600,48 +623,66 @@ function sanitizeContent(markdown) {
 
 
 // ================================================================
-// QC PASS -- Claude reviews full markdown and fixes broken content
+// QC PASS -- Only runs if garbled content is actually detected
+// Saves ~15 minutes per book by skipping clean content
 // ================================================================
+function hasGarbledContent(text) {
+  // Check for known jsPDF encoding corruption patterns
+  const garblePatterns = [
+    /[%&]{3,}/,           // %&& or &&& patterns
+    /&[0-9]&[0-9]/,       // &0&1 style
+    /&[A-Za-z]&[A-Za-z]/, // &L&o style
+    /```/,                 // leftover code fences the sanitizer missed
+  ];
+  return garblePatterns.some(p => p.test(text));
+}
+
 async function qualityCheck(markdown, topic) {
-  const CHUNK = 6000;
-  if (markdown.length <= CHUNK) {
-    return await qcChunk(markdown, topic);
+  // Skip QC entirely if content looks clean -- saves ~15 minutes
+  if (!hasGarbledContent(markdown)) {
+    console.log('Step 4c: Content looks clean -- skipping QC pass');
+    return markdown;
   }
+
+  console.log('Step 4c: Garbled content detected -- running targeted QC...');
+
+  // Only QC the chapters that actually have problems
   const chapterSplits = markdown.split(/(?=^# )/m);
   const fixedChunks = [];
+  let fixedCount = 0;
+
   for (const chunk of chapterSplits) {
-    if (chunk.trim()) {
+    if (!chunk.trim()) continue;
+    if (hasGarbledContent(chunk)) {
       const fixed = await qcChunk(chunk, topic);
       fixedChunks.push(fixed);
-      await sleep(1000);
+      fixedCount++;
+      await sleep(500);
+    } else {
+      fixedChunks.push(chunk);
     }
   }
+
+  console.log('Step 4c: Fixed ' + fixedCount + ' chapter(s)');
   return fixedChunks.join('\n\n');
 }
 
 async function qcChunk(chunk, topic) {
   const prompt = 'You are a quality control editor for the ebook: "' + topic.title + '"\n\n' +
-    'Review the following markdown content and fix ANY of these issues:\n' +
-    '1. Garbled or corrupted text (random symbols, %&&, encoding errors) -- rewrite the section properly\n' +
-    '2. Code blocks with backticks -- convert ALL file paths and folder structures to plain bullet lists\n' +
-    '3. Incomplete sentences that cut off mid-thought -- complete them\n' +
-    '4. Content that is off-topic for "' + topic.niche + '" -- rewrite to stay on topic\n' +
-    '5. Duplicate paragraphs -- remove duplicates\n' +
-    '6. Any line containing garbled symbols like %&&, &0&1, &L&o -- rewrite that entire section properly\n\n' +
+    'Fix ONLY these specific issues in the markdown content below:\n' +
+    '1. Garbled text with symbols like %&&, &0&1, &L&o -- rewrite those sections properly\n' +
+    '2. Code blocks with backticks -- convert to plain bullet lists\n' +
+    '3. Incomplete sentences that cut off mid-thought -- complete them\n\n' +
     'RULES:\n' +
-    '- Preserve all markdown headings exactly (# ## ###)\n' +
-    '- Preserve all > blockquotes\n' +
-    '- Preserve all **bold** formatting\n' +
-    '- Preserve all bullet points (- item)\n' +
+    '- Preserve all markdown headings (# ## ###), blockquotes (>), **bold**, bullets (-)\n' +
     '- Preserve fill-in lines (_____)\n' +
-    '- Do NOT add new content -- only fix what is broken\n' +
-    '- Do NOT remove workbook sections\n' +
+    '- Do NOT add new content, do NOT remove workbook sections\n' +
     '- Return ONLY the corrected markdown, nothing else\n\n' +
-    'CONTENT TO REVIEW:\n' + chunk;
+    'CONTENT:\n' + chunk;
 
   const fixed = await callClaude(
     prompt,
-    'You are a precise quality control editor. Return only corrected markdown. No explanations.',
+    'Return only corrected markdown. No explanations.',
     4000
   );
   return fixed.trim();
