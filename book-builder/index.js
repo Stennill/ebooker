@@ -124,6 +124,10 @@ async function buildBook(topic) {
 
   // Step 6: Save to R2 -- MUST succeed before Gumroad publish
   log('Step 6: Saving to R2...');
+  // Attach estPages and chapter titles to topic so manifest has them
+  topic.estPages = estPages;
+  topic.chapterTitles = outline.chapters.map(c => c.title);
+
   const r2Key = await saveToR2(pdfBytes, topic);
   log('Step 6: Saved -- ' + r2Key);
 
@@ -410,7 +414,65 @@ async function saveToR2(pdfBytes, topic) {
     },
   }));
 
+  // Update manifest.json -- the site reads this to show real book data
+  await updateManifest(client, bucket, topic, key, topic.estPages || 80);
+
   return key;
+}
+
+// ================================================================
+// UPDATE MANIFEST -- keeps a public manifest.json in R2 with all
+// published books so the site can fetch and display them
+// ================================================================
+async function updateManifest(client, bucket, topic, pdfKey, estPages) {
+  // Read existing manifest
+  let books = [];
+  try {
+    const { GetObjectCommand } = require('@aws-sdk/client-s3');
+    const existing = await client.send(new GetObjectCommand({
+      Bucket: bucket,
+      Key: 'manifest.json',
+    }));
+    const chunks = [];
+    for await (const chunk of existing.Body) chunks.push(chunk);
+    books = JSON.parse(Buffer.concat(chunks).toString());
+  } catch (e) {
+    // No manifest yet -- start fresh
+    books = [];
+  }
+
+  // Build chapter list from outline if available, fallback to empty
+  const chapterTitles = (topic.chapterTitles || []);
+
+  // Add this book
+  const slug = topic.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  books.push({
+    id: 'BP-' + String(books.length + 1).padStart(3, '0'),
+    slug: slug,
+    title: topic.title,
+    subtitle: topic.subtitle,
+    niche: topic.niche,
+    price: '$' + (topic.price || 14.99),
+    pages: estPages,
+    chapters: chapterTitles,
+    pdfKey: pdfKey,
+    publishedAt: new Date().toISOString(),
+  });
+
+  // Only keep the latest 3 books (one bundle's worth)
+  // Older books roll off -- swap this logic when you want a full catalogue
+  if (books.length > 3) books = books.slice(-3);
+
+  await client.send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: 'manifest.json',
+    Body: Buffer.from(JSON.stringify(books, null, 2)),
+    ContentType: 'application/json',
+    // Allow the site to read this publicly
+    ACL: 'public-read',
+  }));
+
+  console.log('Manifest updated -- ' + books.length + ' books');
 }
 
 // ================================================================
