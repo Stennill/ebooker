@@ -398,7 +398,11 @@ async function saveToR2(pdfBytes, topic) {
 
   const date = new Date().toISOString().split('T')[0];
   const slug = topic.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  const key = 'ebooks/' + date + '/' + slug + '.pdf';
+  // Singles go under ebooks/singles/date/, bundles under ebooks/bundles/bundleId/
+  const folder = topic.bundleId
+    ? 'ebooks/bundles/' + topic.bundleId
+    : 'ebooks/singles/' + date;
+  const key = folder + '/' + slug + '.pdf';
 
   const bodyBuffer = Buffer.isBuffer(pdfBytes) ? pdfBytes : Buffer.from(pdfBytes);
 
@@ -464,6 +468,8 @@ async function updateManifest(client, bucket, topic, pdfKey, estPages) {
     pages: estPages,
     chapters: topic.chapterTitles || [],
     pdfKey: pdfKey,
+    type: topic.bundleId ? 'bundle' : 'single',
+    bundleId: topic.bundleId || null,
     publishedAt: new Date().toISOString(),
   };
 
@@ -492,7 +498,6 @@ async function updateManifest(client, bucket, topic, pdfKey, estPages) {
     Key: 'manifest.json',
     Body: Buffer.from(JSON.stringify(manifest, null, 2)),
     ContentType: 'application/json',
-    ACL: 'public-read',
   }));
 
   console.log('Manifest updated -- ' + manifest.allBooks.length + ' total books, ' + manifest.bundleArchive.length + ' bundles archived');
