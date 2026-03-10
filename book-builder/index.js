@@ -147,7 +147,7 @@ FOR: ${topic.target_audience}
 PROBLEM SOLVED: ${topic.core_problem}
 TRANSFORMATION: ${topic.transformation}
 CHAPTERS: ${chapterCount} chapters (this is the target -- stay within 1 of this number)
-WORDS PER CHAPTER: ${topic.words_per_chapter || 1500}
+WORDS PER CHAPTER: ${topic.words_per_chapter || 2000}
 
 IMPORTANT: The "chapters" array must contain ${chapterCount} objects (between 13 and 16).
 Each chapter should build logically on the previous one, taking the reader 
@@ -179,7 +179,7 @@ Remember: ${chapterCount} chapter objects in the array.`,
 // ================================================================
 async function writeChapter(topic, outline, chapterPlan, chapterNum) {
   const totalChapters = outline.chapters.length;
-  const wordsTarget = topic.words_per_chapter || 1500;
+  const wordsTarget = topic.words_per_chapter || 2000;
 
   const raw = await callClaude(
     `You are writing Chapter ${chapterNum} of ${totalChapters} for the ebook "${topic.title}".
@@ -202,13 +202,13 @@ Write the COMPLETE chapter with ${wordsTarget}+ words. Structure:
 # Chapter ${chapterNum}: ${chapterPlan.title}
 
 ## ${chapterPlan.subsections[0]}
-(write this section fully -- 400+ words)
+(write this section fully -- 600+ words)
 
 ## ${chapterPlan.subsections[1]}
-(write this section fully -- 400+ words)
+(write this section fully -- 600+ words)
 
 ## ${chapterPlan.subsections[2] || 'Putting It Into Practice'}
-(write this section fully -- 300+ words)
+(write this section fully -- 500+ words)
 
 ## Workbook: Chapter ${chapterNum} Exercises
 **Reflect:** [Specific reflection question about this chapter's content]
@@ -227,7 +227,7 @@ WRITING STYLE:
 - Be specific and practical -- no filler or fluff
 - Fill-in exercise lines must end with _______________`,
     'You are a professional ebook author. Write complete thorough chapter content. Never truncate. Write every word.',
-    2000
+    3500
   );
 
   return raw.trim();
