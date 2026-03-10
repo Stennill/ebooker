@@ -103,10 +103,19 @@ async function buildBook(topic) {
 
   // Step 4: Assemble full markdown
   log('Step 4: Assembling full book...');
-  const fullBook = assembleBook(topic, outline, frontMatter, chapters, backMatter);
+  const rawBook = assembleBook(topic, outline, frontMatter, chapters, backMatter);
+
+  // Step 4b: Sanitize -- strip code fences and fix jsPDF-breaking characters
+  log('Step 4b: Sanitizing content...');
+  const sanitizedBook = sanitizeContent(rawBook);
+
+  // Step 4c: QC pass -- Claude reviews and fixes the full markdown
+  log('Step 4c: Running QC pass...');
+  const fullBook = await qualityCheck(sanitizedBook, topic);
+
   const wordCount = fullBook.split(/\s+/).length;
   const estPages = Math.ceil(wordCount / 220);
-  log('Step 4: Book assembled -- ' + wordCount.toLocaleString() + ' words, ~' + estPages + ' pages');
+  log('Step 4c: QC complete -- ' + wordCount.toLocaleString() + ' words, ~' + estPages + ' pages');
 
   // Step 5: Generate PDF
   log('Step 5: Generating PDF...');
@@ -488,6 +497,94 @@ async function publishToGumroad(topic, pdfBytes) {
 
   return publishData.product.short_url;
 }
+
+// ================================================================
+// SANITIZE -- Strip problematic content before PDF rendering
+// Fixes jsPDF encoding bugs caused by code blocks and special chars
+// ================================================================
+function sanitizeContent(markdown) {
+  let text = markdown;
+
+  // Remove triple-backtick code blocks -- convert to plain bullet list
+  text = text.replace(/```[^\n]*\n([\s\S]*?)```/g, function(match, code) {
+    const lines = code.trim().split('\n').filter(function(l) { return l.trim(); });
+    return lines.map(function(l) { return '- ' + l.trim().replace(/[^\x20-\x7E]/g, ''); }).join('\n') + '\n';
+  });
+
+  // Remove inline backticks -- keep the text inside
+  text = text.replace(/`([^`]+)`/g, '$1');
+
+  // Strip any remaining backtick characters
+  text = text.replace(/`/g, '');
+
+  // Remove HTML tags
+  text = text.replace(/<[^>]+>/g, '');
+
+  // Normalize unicode quotes and dashes to ASCII
+  text = text.replace(/\u2018|\u2019/g, "'");
+  text = text.replace(/\u201C|\u201D/g, '"');
+  text = text.replace(/\u2013|\u2014/g, '-');
+  text = text.replace(/\u2026/g, '...');
+  text = text.replace(/\u00A0/g, ' ');
+
+  // Strip non-printable characters jsPDF cannot handle
+  text = text.replace(/[^\x09\x0A\x0D\x20-\x7E\xA1-\xFF]/g, '');
+
+  // Clean up excessive blank lines
+  text = text.replace(/\n{4,}/g, '\n\n\n');
+
+  return text;
+}
+
+
+// ================================================================
+// QC PASS -- Claude reviews full markdown and fixes broken content
+// ================================================================
+async function qualityCheck(markdown, topic) {
+  const CHUNK = 6000;
+  if (markdown.length <= CHUNK) {
+    return await qcChunk(markdown, topic);
+  }
+  const chapterSplits = markdown.split(/(?=^# )/m);
+  const fixedChunks = [];
+  for (const chunk of chapterSplits) {
+    if (chunk.trim()) {
+      const fixed = await qcChunk(chunk, topic);
+      fixedChunks.push(fixed);
+      await sleep(1000);
+    }
+  }
+  return fixedChunks.join('\n\n');
+}
+
+async function qcChunk(chunk, topic) {
+  const prompt = 'You are a quality control editor for the ebook: "' + topic.title + '"\n\n' +
+    'Review the following markdown content and fix ANY of these issues:\n' +
+    '1. Garbled or corrupted text (random symbols, %&&, encoding errors) -- rewrite the section properly\n' +
+    '2. Code blocks with backticks -- convert ALL file paths and folder structures to plain bullet lists\n' +
+    '3. Incomplete sentences that cut off mid-thought -- complete them\n' +
+    '4. Content that is off-topic for "' + topic.niche + '" -- rewrite to stay on topic\n' +
+    '5. Duplicate paragraphs -- remove duplicates\n' +
+    '6. Any line containing garbled symbols like %&&, &0&1, &L&o -- rewrite that entire section properly\n\n' +
+    'RULES:\n' +
+    '- Preserve all markdown headings exactly (# ## ###)\n' +
+    '- Preserve all > blockquotes\n' +
+    '- Preserve all **bold** formatting\n' +
+    '- Preserve all bullet points (- item)\n' +
+    '- Preserve fill-in lines (_____)\n' +
+    '- Do NOT add new content -- only fix what is broken\n' +
+    '- Do NOT remove workbook sections\n' +
+    '- Return ONLY the corrected markdown, nothing else\n\n' +
+    'CONTENT TO REVIEW:\n' + chunk;
+
+  const fixed = await callClaude(
+    prompt,
+    'You are a precise quality control editor. Return only corrected markdown. No explanations.',
+    4000
+  );
+  return fixed.trim();
+}
+
 
 // ================================================================
 // UTILITIES
