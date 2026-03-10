@@ -28,7 +28,7 @@ const ORANGE     = [255, 107, 26];   // #ff6b1a -- primary accent
 const ORANGE_DIM = [200,  80, 10];   // darker orange for text
 const ICE        = [221, 238, 255];  // #ddeeff -- foreground text
 const ICE_DIM    = [140, 165, 195];  // muted foreground
-const ICE_FAINT  = [ 30,  50,  80];  // very subtle grid lines
+const ICE_FAINT  = [ 10,  30,  60];  // very subtle grid lines
 
 const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/health') {
