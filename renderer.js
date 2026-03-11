@@ -6,7 +6,7 @@ const http = require('http');
 
 let puppeteer;
 try {
-  puppeteer = require('puppeteer');
+  puppeteer = require('puppeteer-core');
 } catch (e) {
   console.error('puppeteer not found. Run: npm install');
   process.exit(1);
@@ -303,9 +303,12 @@ function buildHTML(data) {
 
 async function renderPDF(data) {
   const html = buildHTML(data);
+  const chromium = require('@sparticuz/chromium');
   const browser = await puppeteer.launch({
-    headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+    args: chromium.args,
+    defaultViewport: chromium.defaultViewport,
+    executablePath: await chromium.executablePath(),
+    headless: chromium.headless,
   });
   try {
     const page = await browser.newPage();
