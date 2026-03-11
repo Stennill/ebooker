@@ -140,7 +140,7 @@ async function buildBook(topic) {
 // Plans all chapters before writing begins
 // ================================================================
 async function generateOutline(topic) {
-  const chapterCount = topic.chapter_count || 13;
+  const chapterCount = topic.chapter_count || 7;
 
   const raw = await callClaude(
     `Create a detailed chapter-by-chapter outline for this ebook.
@@ -151,9 +151,9 @@ FOR: ${topic.target_audience}
 PROBLEM SOLVED: ${topic.core_problem}
 TRANSFORMATION: ${topic.transformation}
 CHAPTERS: ${chapterCount} chapters (this is the target -- stay within 1 of this number)
-WORDS PER CHAPTER: ${topic.words_per_chapter || 2000}
+WORDS PER CHAPTER: ${topic.words_per_chapter || 600}
 
-IMPORTANT: The "chapters" array must contain ${chapterCount} objects (between 13 and 16).
+IMPORTANT: The "chapters" array must contain ${chapterCount} objects (between 6 and 8).
 Each chapter should build logically on the previous one, taking the reader 
 from their current problem to the full transformation by the final chapter.
 
@@ -170,7 +170,7 @@ Return ONLY raw JSON, no markdown:
   ]
 }
 
-Remember: ${chapterCount} chapter objects in the array.`,
+Remember: ${chapterCount} chapter objects in the array. Keep it tight -- this is a concise blueprint, not a textbook.`,
     'Return only raw JSON. No markdown fences. No explanation. The chapters array must have exactly the requested number of entries.',
     4000
   );
@@ -183,7 +183,7 @@ Remember: ${chapterCount} chapter objects in the array.`,
 // ================================================================
 async function writeChapter(topic, outline, chapterPlan, chapterNum) {
   const totalChapters = outline.chapters.length;
-  const wordsTarget = topic.words_per_chapter || 2000;
+  const wordsTarget = topic.words_per_chapter || 600;
 
   const raw = await callClaude(
     `You are writing Chapter ${chapterNum} of ${totalChapters} for the ebook "${topic.title}".
@@ -201,7 +201,7 @@ ${chapterPlan.key_points.map((p, i) => (i + 1) + '. ' + p).join('\n')}
 Subsections to include:
 ${chapterPlan.subsections.map((s, i) => '## ' + s).join('\n')}
 
-Write the COMPLETE chapter with ${wordsTarget}+ words. Structure:
+Write the COMPLETE chapter in ${wordsTarget}-${wordsTarget + 100} words. Be tight, specific, and actionable. No filler. Structure:
 
 # Chapter ${chapterNum}: ${chapterPlan.title}
 
@@ -231,7 +231,7 @@ WRITING STYLE:
 - Be specific and practical -- no filler or fluff
 - Fill-in exercise lines must end with _______________`,
     'You are a professional ebook author. Write complete thorough chapter content. Never truncate. Write every word.',
-    3500
+    1100
   );
 
   return raw.trim();
