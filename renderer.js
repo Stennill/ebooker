@@ -28,7 +28,7 @@ const ORANGE     = [255, 107, 26];   // #ff6b1a -- primary accent
 const ORANGE_DIM = [200,  80, 10];   // darker orange for text
 const ICE        = [221, 238, 255];  // #ddeeff -- foreground text
 const ICE_DIM    = [140, 165, 195];  // muted foreground
-const ICE_FAINT  = [ 10,  30,  60];  // very subtle grid lines
+const ICE_FAINT  = [ 10,  30,  50];  // very subtle grid lines
 
 const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/health') {
@@ -274,25 +274,27 @@ function buildPDF({ title, subtitle, niche, wordCount, estPages, content }) {
 
     if (!line) { y += 8; continue; }
 
-    // H1 -- chapter heading
+    // H1 -- chapter heading -- ALWAYS starts a new page
     if (line.startsWith('# ') && !line.startsWith('## ') && !line.startsWith('### ')) {
       inWorkbook = false;
-      if (y > 120) { newPage(); drawHeader(); y = 58; }
+      // Always start chapter on a fresh page
+      newPage();
+      drawHeader();
+      y = 58;
 
-      // Navy banner for chapter headings
-      fill(NAVY);
+      // Navy banner sized to fit title
       const ht = doc.splitTextToSize(line.replace(/^# /, ''), CW - 16);
-      doc.rect(ML - 8, y - 4, CW + 16, ht.length * 22 + 20, 'F');
-
-      // Orange left accent
+      const bannerH = ht.length * 22 + 24;
+      fill(NAVY);
+      doc.rect(ML - 8, y - 4, CW + 16, bannerH, 'F');
       fill(ORANGE);
-      doc.rect(ML - 8, y - 4, 4, ht.length * 22 + 20, 'F');
+      doc.rect(ML - 8, y - 4, 4, bannerH, 'F');
 
       doc.setFontSize(17);
       doc.setFont('helvetica', 'bold');
       textColor(ICE);
       doc.text(ht, ML + 4, y + 14);
-      y += ht.length * 22 + 24;
+      y += bannerH + 4;
 
       stroke(ORANGE);
       doc.setGState(new doc.GState({ opacity: 0.3 }));
@@ -305,7 +307,7 @@ function buildPDF({ title, subtitle, niche, wordCount, estPages, content }) {
 
     // H3
     if (line.startsWith('### ')) {
-      y = checkOverflow(y, 22);
+      y = checkOverflow(y, 30);
       doc.setFontSize(10);
       doc.setFont('helvetica', 'italic');
       textColor(ICE_DIM);
@@ -318,31 +320,34 @@ function buildPDF({ title, subtitle, niche, wordCount, estPages, content }) {
     if (line.startsWith('## ')) {
       const label = line.replace(/^## /, '');
       const isWB = label.toLowerCase().startsWith('workbook:');
-      y = checkOverflow(y, 32);
 
       if (isWB) {
+        // Workbook always starts on its own page
+        newPage();
+        drawHeader();
+        y = 58;
         inWorkbook = true;
         fill(ORANGE);
-        doc.setGState(new doc.GState({ opacity: 0.1 }));
-        doc.rect(ML - 8, y - 4, CW + 16, 26, 'F');
+        doc.setGState(new doc.GState({ opacity: 0.12 }));
+        doc.rect(ML - 8, y - 4, CW + 16, 28, 'F');
         doc.setGState(new doc.GState({ opacity: 1 }));
         fill(ORANGE);
-        doc.rect(ML - 8, y - 4, 3, 26, 'F');
+        doc.rect(ML - 8, y - 4, 3, 28, 'F');
         doc.setFontSize(11);
         doc.setFont('helvetica', 'bold');
         textColor(ORANGE_DIM);
       } else {
         inWorkbook = false;
+        // Ensure at least 80pt below heading for content -- otherwise new page
+        y = checkOverflow(y, 80);
         doc.setFontSize(13);
         doc.setFont('helvetica', 'bold');
         textColor(NAVY);
-        // Subtle orange underline
-        const labelW = doc.getStringUnitWidth(label.replace(/^## /, '')) * 13 / doc.internal.scaleFactor;
       }
 
       const ht = doc.splitTextToSize(label, CW);
       doc.text(ht, ML, y + 16);
-      y += ht.length * 18 + 10;
+      y += ht.length * 18 + 12;
       continue;
     }
 
@@ -367,13 +372,13 @@ function buildPDF({ title, subtitle, niche, wordCount, estPages, content }) {
       continue;
     }
 
-    // Bullet list
-    if (line.match(/^[*-] /)) {
-      const bt = line.replace(/^[*-] /, '').replace(/\*\*(.+?)\*\*/g, '$1');
+    // Bullet list -- also catch lines that are clearly list items without markdown prefix
+    const isBullet = line.match(/^[*\-] /) || (inWorkbook && line.match(/^[A-Z][a-z]/) && line.length < 80 && !line.includes('.') === false && line.split(' ').length <= 8);
+    if (line.match(/^[*\-] /)) {
+      const bt = line.replace(/^[*\-] /, '').replace(/\*\*(.+?)\*\*/g, '$1');
       const bLines = doc.splitTextToSize(bt, CW - 18);
-      y = checkOverflow(y, bLines.length * 14 + 6);
+      y = checkOverflow(y, bLines.length * 15 + 6);
 
-      // Orange square bullet
       fill(ORANGE);
       doc.rect(ML + 2, y + 4, 4, 4, 'F');
 
@@ -381,7 +386,7 @@ function buildPDF({ title, subtitle, niche, wordCount, estPages, content }) {
       doc.setFont('helvetica', 'normal');
       textColor([30, 40, 60]);
       doc.text(bLines, ML + 16, y + 10);
-      y += bLines.length * 14 + 6;
+      y += bLines.length * 15 + 6;
       continue;
     }
 
@@ -389,12 +394,12 @@ function buildPDF({ title, subtitle, niche, wordCount, estPages, content }) {
     if (line.includes('___')) {
       const ft = line.replace(/\*\*(.+?)\*\*/g, '$1');
       const fLines = doc.splitTextToSize(ft, CW - 10);
-      y = checkOverflow(y, fLines.length * 14 + 10);
+      y = checkOverflow(y, fLines.length * 15 + 12);
       doc.setFontSize(10);
       doc.setFont('helvetica', 'italic');
       textColor(ICE_DIM);
       doc.text(fLines, ML + 6, y + 11);
-      y += fLines.length * 14 + 10;
+      y += fLines.length * 15 + 12;
       continue;
     }
 
