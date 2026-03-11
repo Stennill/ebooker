@@ -305,12 +305,18 @@ async function renderPDF(data) {
   const html = buildHTML(data);
   const { execSync } = require('child_process');
 
-  // Find chromium executable -- works on Railway/Nix and local
+  // Find chromium -- Nix installs to store, not /usr/bin
   let executablePath;
+  const candidates = [
+    '/run/current-system/sw/bin/chromium',
+    '/nix/var/nix/profiles/default/bin/chromium',
+  ];
   try {
-    executablePath = execSync('which chromium || which chromium-browser || which google-chrome', { encoding: 'utf8' }).trim().split('\n')[0];
+    // Try find in PATH first
+    const found = execSync('which chromium 2>/dev/null || which chromium-browser 2>/dev/null || which google-chrome-stable 2>/dev/null || find /nix -name "chromium" -type f 2>/dev/null | head -1', { encoding: 'utf8' }).trim().split('\n')[0];
+    executablePath = found || candidates[0];
   } catch (e) {
-    executablePath = '/usr/bin/chromium';
+    executablePath = candidates[0];
   }
   console.log('Using Chromium at:', executablePath);
 
@@ -378,4 +384,12 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, () => {
   console.log('Renderer (Puppeteer) listening on port ' + PORT);
+  // Log chromium location at startup for debugging
+  const { execSync } = require('child_process');
+  try {
+    const loc = execSync('find /nix /usr /opt -name "chromium" -type f 2>/dev/null | head -5', { encoding: 'utf8' });
+    console.log('Chromium candidates found:\n' + loc);
+  } catch(e) {
+    console.log('Could not locate chromium:', e.message);
+  }
 });
