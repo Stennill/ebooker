@@ -28,7 +28,7 @@ const ORANGE     = [255, 107, 26];   // #ff6b1a -- primary accent
 const ORANGE_DIM = [200,  80, 10];   // darker orange for text
 const ICE        = [221, 238, 255];  // #ddeeff -- foreground text
 const ICE_DIM    = [140, 165, 195];  // muted foreground
-const ICE_FAINT  = [ 10,  30,  50];  // very subtle grid lines
+const ICE_FAINT  = [ 30,  50,  80];  // very subtle grid lines
 
 const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/health') {
@@ -177,25 +177,56 @@ function buildPDF({ title, subtitle, niche, wordCount, estPages, content }) {
   doc.text('$', PW - 60, PH / 2 + 160, { align: 'right' });
   doc.setGState(new doc.GState({ opacity: 1 }));
 
-  // Main title
-  doc.setFontSize(28);
+  // ── MAIN TITLE: site-style large bold display ──
+  // Split "The $1K First Month Blueprint:" prefix from the specific subtitle
+  const prefixMatch = title.match(/^(The \$1K First Month Blueprint:?)\s*(.*)$/i);
+  const titlePrefix = prefixMatch ? prefixMatch[1] : title;
+  const titleSpecific = prefixMatch ? prefixMatch[2] : '';
+
+  const titleY = PH * 0.38;
+
+  // "The" -- small regular weight
+  doc.setFontSize(38);
+  doc.setFont('helvetica', 'normal');
+  textColor(ICE);
+  doc.text('The', ML, titleY);
+
+  // "$1K" -- large orange bold
+  doc.setFontSize(62);
+  doc.setFont('helvetica', 'bold');
+  textColor(ORANGE);
+  const theWidth = doc.getTextWidth('The ');
+  doc.setFontSize(38);
+  const theW = doc.getTextWidth('The ');
+  doc.setFontSize(54);
+  doc.text('$1K', ML + theW * 0.92, titleY);
+
+  // "First Month Blueprint" -- large bold white, line 2
+  doc.setFontSize(42);
   doc.setFont('helvetica', 'bold');
   textColor(ICE);
-  const titleLines = doc.splitTextToSize(title, CW);
-  const titleY = PH / 2 - (titleLines.length * 34) / 2 - 20;
-  doc.text(titleLines, ML, titleY);
+  doc.text('First Month Blueprint', ML, titleY + 50);
 
-  // Orange accent line under title
-  const afterTitle = titleY + titleLines.length * 34 + 8;
+  // Specific subtitle part -- smaller, ice dim
+  if (titleSpecific) {
+    const specLines = doc.splitTextToSize(titleSpecific, CW);
+    doc.setFontSize(13);
+    doc.setFont('helvetica', 'normal');
+    textColor(ICE_DIM);
+    doc.text(specLines, ML, titleY + 80);
+  }
+
+  // Orange accent bar
+  const afterTitle = titleY + 80 + (titleSpecific ? doc.splitTextToSize(titleSpecific, CW).length * 18 + 8 : 8);
   fill(ORANGE);
   doc.rect(ML, afterTitle, 60, 3, 'F');
 
-  // Subtitle
-  doc.setFontSize(12);
+  // Tagline subtitle
+  doc.setFontSize(11);
   doc.setFont('helvetica', 'normal');
   textColor(ICE_DIM);
   const subLines = doc.splitTextToSize(subtitle, CW);
-  doc.text(subLines, ML, afterTitle + 20);
+  doc.text(subLines, ML, afterTitle + 18);
 
   // Bottom section
   stroke(ICE_DIM);
@@ -433,33 +464,37 @@ function buildPDF({ title, subtitle, niche, wordCount, estPages, content }) {
   doc.text('$1K', ML - 10, PH / 2 + 90);
   doc.setGState(new doc.GState({ opacity: 1 }));
 
+  // Back cover content -- vertically centered in top 2/3 of page
+  const bcY = PH * 0.28;
+
   // Series label
   doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
   textColor(ORANGE);
-  doc.text('THE $1K FIRST MONTH BLUEPRINT SERIES', ML, PH / 2 - 50, { charSpace: 1.2 });
+  doc.text('THE $1K FIRST MONTH BLUEPRINT SERIES', ML, bcY, { charSpace: 1.2 });
 
   stroke(ORANGE);
   doc.setGState(new doc.GState({ opacity: 0.3 }));
   doc.setLineWidth(0.5);
-  doc.line(ML, PH / 2 - 38, PW - MR, PH / 2 - 38);
+  doc.line(ML, bcY + 12, PW - MR, bcY + 12);
   doc.setGState(new doc.GState({ opacity: 1 }));
 
   doc.setFontSize(15);
   doc.setFont('helvetica', 'bold');
   textColor(ICE);
   const backTitleLines = doc.splitTextToSize(title, CW);
-  doc.text(backTitleLines, ML, PH / 2 - 18);
+  doc.text(backTitleLines, ML, bcY + 30);
 
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
   textColor(ICE_DIM);
   const subBack = doc.splitTextToSize(subtitle, CW);
-  doc.text(subBack, ML, PH / 2 - 18 + backTitleLines.length * 20 + 10);
+  doc.text(subBack, ML, bcY + 30 + backTitleLines.length * 20 + 14);
 
+  // PDF Digital Edition label -- no page count
   doc.setFontSize(7.5);
   textColor(ICE_DIM);
-  doc.text('PDF Digital Edition   ' + estPages + ' pages', ML, PH - 24, { charSpace: 0.5 });
+  doc.text('PDF Digital Edition', ML, PH - 24, { charSpace: 0.5 });
 
   return doc.output('arraybuffer');
 }
