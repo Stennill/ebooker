@@ -303,12 +303,28 @@ function buildHTML(data) {
 
 async function renderPDF(data) {
   const html = buildHTML(data);
-  const chromium = require('@sparticuz/chromium');
+  const { execSync } = require('child_process');
+
+  // Find chromium executable -- works on Railway/Nix and local
+  let executablePath;
+  try {
+    executablePath = execSync('which chromium || which chromium-browser || which google-chrome', { encoding: 'utf8' }).trim().split('\n')[0];
+  } catch (e) {
+    executablePath = '/usr/bin/chromium';
+  }
+  console.log('Using Chromium at:', executablePath);
+
   const browser = await puppeteer.launch({
-    args: chromium.args,
-    defaultViewport: chromium.defaultViewport,
-    executablePath: await chromium.executablePath(),
-    headless: chromium.headless,
+    executablePath,
+    headless: 'new',
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--disable-software-rasterizer',
+      '--single-process',
+    ],
   });
   try {
     const page = await browser.newPage();
